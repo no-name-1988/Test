@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoiceReader — Đọc văn bản</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Mono:wght@300;400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0d0d;
+    --surface: #161616;
+    --surface2: #1f1f1f;
+    --border: #2a2a2a;
+    --accent: #e8c97a;
+    --accent2: #c4a35a;
+    --text: #e8e4dc;
+    --muted: #6b6660;
+    --reading: #e8c97a22;
+    --reading-line: #e8c97a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* NOISE TEXTURE */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+  }
+
+  header {
+    padding: 24px 40px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: relative;
+    z-index: 1;
+  }
+
+  .logo {
+    font-family: 'Playfair Display', serif;
+    font-size: 22px;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+  }
+
+  .logo span {
+    color: var(--muted);
+    font-size: 13px;
+    font-family: 'DM Mono', monospace;
+    font-weight: 300;
+    margin-left: 12px;
+  }
+
+  .char-badge {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--muted);
+    background: var(--surface2);
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    transition: color 0.3s;
+  }
+
+  .char-badge.active { color: var(--accent); border-color: var(--accent2); }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* INPUT PANEL */
+  .panel-input {
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-header {
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: var(--muted);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .dot.gold { background: var(--accent); }
+  .dot.green { background: #7ec99a; }
+
+  textarea {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    line-height: 1.75;
+    padding: 28px;
+    resize: none;
+    font-weight: 300;
+  }
+
+  textarea::placeholder { color: var(--muted); }
+
+  /* OUTPUT PANEL */
+  .panel-output {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .reading-area {
+    flex: 1;
+    padding: 28px;
+    overflow-y: auto;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    line-height: 1.9;
+    font-weight: 300;
+    max-height: calc(100vh - 260px);
+  }
+
+  .reading-area::-webkit-scrollbar { width: 4px; }
+  .reading-area::-webkit-scrollbar-track { background: transparent; }
+  .reading-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .placeholder-msg {
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    margin-top: 60px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* WORD HIGHLIGHT */
+  .word {
+    display: inline;
+    padding: 1px 2px;
+    border-radius: 3px;
+    transition: background 0.1s, color 0.1s;
+  }
+
+  .word.active {
+    background: var(--accent);
+    color: #0d0d0d;
+    font-weight: 500;
+  }
+
+  .word.spoken {
+    color: var(--muted);
+  }
+
+  /* CONTROLS */
+  .controls-bar {
+    padding: 20px 28px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .controls-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 8px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    padding: 8px 18px;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #0d0d0d;
+    border-color: var(--accent);
+    font-weight: 500;
+    padding: 10px 28px;
+  }
+
+  .btn-primary:hover {
+    background: var(--accent2);
+    color: #0d0d0d;
+    border-color: var(--accent2);
+  }
+
+  .btn-icon {
+    width: 40px; height: 40px;
+    padding: 0;
+    justify-content: center;
+    font-size: 16px;
+    border-radius: 50%;
+  }
+
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn:disabled:hover { border-color: var(--border); color: var(--text); }
+
+  /* PROGRESS BAR */
+  .progress-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .progress-bar-bg {
+    flex: 1;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.1s;
+  }
+
+  .progress-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    min-width: 60px;
+    text-align: right;
+  }
+
+  /* SETTINGS ROW */
+  .settings-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 14px 28px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    flex-wrap: wrap;
+  }
+
+  .setting-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .setting-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  select, input[type=range] {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    padding: 5px 10px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  select:focus { border-color: var(--accent); }
+
+  input[type=range] {
+    padding: 0;
+    width: 90px;
+    accent-color: var(--accent);
+    border: none;
+    background: transparent;
+  }
+
+  .range-val {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    min-width: 28px;
+  }
+
+  /* STATUS */
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .status-dot.playing {
+    background: #7ec99a;
+    box-shadow: 0 0 8px #7ec99a88;
+    animation: pulse 1.2s infinite;
+  }
+  .status-dot.paused { background: var(--accent); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .status-text {
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  /* CHUNK INFO */
+  .chunk-info {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    margin-left: auto;
+  }
+
+  /* RESPONSIVE */
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 50vh 1fr; }
+    .panel-input { border-right: none; border-bottom: 1px solid var(--border); }
+    header { padding: 16px 20px; }
+  }
+
+  /* TOAST */
+  .toast {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    opacity: 0;
+    transition: all 0.3s;
+    z-index: 100;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    VoiceReader
+    <span>TTS ENGINE</span>
+  </div>
+  <div class="char-badge" id="charBadge">0 ký tự</div>
+</header>
+
+<main>
+  <!-- INPUT PANEL -->
+  <div class="panel-input">
+    <div class="panel-header">
+      <div class="dot gold"></div>
+      Văn bản đầu vào
+    </div>
+    <textarea id="inputText" placeholder="Dán văn bản vào đây... Hỗ trợ đến 20.000+ ký tự, văn bản dài sẽ được tự động chia nhỏ (chunking) để đọc liền mạch."></textarea>
+  </div>
+
+  <!-- OUTPUT PANEL -->
+  <div class="panel-output">
+    <div class="panel-header">
+      <div class="dot green" id="statusDot2"></div>
+      Đang đọc
+      <span id="chunkInfo" class="chunk-info"></span>
+    </div>
+    <div class="reading-area" id="readingArea">
+      <div class="placeholder-msg" id="placeholderMsg">← Nhập văn bản rồi nhấn Đọc</div>
+    </div>
+
+    <!-- CONTROLS -->
+    <div class="controls-bar">
+      <div class="controls-row">
+        <div style="display:flex;align-items:center;gap:8px;margin-right:4px">
+          <div class="status-dot" id="statusDot"></div>
+          <span class="status-text" id="statusText">Chờ</span>
+        </div>
+        <button class="btn btn-primary" id="btnPlay" onclick="startReading()">▶ Đọc</button>
+        <button class="btn btn-icon" id="btnPause" onclick="togglePause()" disabled title="Tạm dừng / Tiếp tục">⏸</button>
+        <button class="btn btn-icon" id="btnStop" onclick="stopReading()" disabled title="Dừng">⏹</button>
+        <button class="btn" onclick="clearAll()">✕ Xoá</button>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-bar-bg" id="progressBar" onclick="seekByClick(event)">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <span class="progress-label" id="progressLabel">0%</span>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="settings-row">
+      <div class="setting-group">
+        <span class="setting-label">Giọng</span>
+        <select id="voiceSelect"></select>
+      </div>
+      <div class="setting-group">
+        <span class="setting-label">Tốc độ</span>
+        <input type="range" id="rateRange" min="0.5" max="2" step="0.1" value="1" oninput="updateRate(this.value)">
+        <span class="range-val" id="rateVal">1×</span>
+      </div>
+      <div class="setting-group">
+        <span class="setting-label">Cao độ</span>
+        <input type="range" id="pitchRange" min="0.5" max="2" step="0.1" value="1" oninput="updatePitch(this.value)">
+        <span class="range-val" id="pitchVal">1</span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// =========================================================
+//  CORE STATE
+// =========================================================
+const synth = window.speechSynthesis;
+let voices = [];
+let chunks = [];          // mảng các đoạn văn bản đã chia nhỏ (chunks)
+let words = [];           // tất cả các từ dưới dạng DOM span
+let currentChunk = 0;     // chunk đang được đọc
+let utterance = null;     // đối tượng SpeechSynthesisUtterance hiện tại
+let isPaused = false;
+let isPlaying = false;
+let wordOffset = 0;       // offset (vị trí bù) để tính index từ chính xác across chunks
+let rate = 1, pitch = 1;
+let chunkWordOffsets = []; // vị trí bắt đầu của mỗi chunk trong mảng words[]
+
+// =========================================================
+//  VOICES
+// =========================================================
+function loadVoices() {
+  voices = synth.getVoices();
+  const sel = document.getElementById('voiceSelect');
+  sel.innerHTML = '';
+  // Ưu tiên giọng tiếng Việt, sau đó các giọng khác
+  const sorted = [...voices].sort((a,b) => {
+    const aVi = a.lang.startsWith('vi') ? 0 : 1;
+    const bVi = b.lang.startsWith('vi') ? 0 : 1;
+    return aVi - bVi;
+  });
+  sorted.forEach((v, i) => {
+    const opt = document.createElement('option');
+    opt.value = voices.indexOf(v);
+    opt.textContent = `${v.name} (${v.lang})`;
+    sel.appendChild(opt);
+  });
+}
+
+speechSynthesis.onvoiceschanged = loadVoices;
+loadVoices();
+
+// =========================================================
+//  CHAR COUNT
+// =========================================================
+document.getElementById('inputText').addEventListener('input', function() {
+  const len = this.value.length;
+  const badge = document.getElementById('charBadge');
+  badge.textContent = len.toLocaleString('vi') + ' ký tự';
+  badge.classList.toggle('active', len > 0);
+});
+
+// =========================================================
+//  CHUNKING — chia văn bản dài thành các đoạn ngắn ~800 ký tự
+//  Web Speech API bị giới hạn ~32k chars nhưng nhiều trình duyệt
+//  ngắt giữa chừng với văn bản dài, chunking giải quyết vấn đề này.
+// =========================================================
+function chunkText(text, maxLen = 800) {
+  const result = [];
+  // Ưu tiên cắt ở dấu câu để nghe tự nhiên hơn
+  const sentenceEnds = /([.!?。！？]+\s+|[.!?。！？]+$)/g;
+  let remaining = text.trim();
+  
+  while (remaining.length > maxLen) {
+    let cutAt = -1;
+    // Tìm điểm cắt gần nhất <= maxLen
+    let match;
+    let re = /([.!?。！？]+\s+)/g;
+    re.lastIndex = 0;
+    while ((match = re.exec(remaining)) !== null) {
+      if (match.index + match[0].length <= maxLen) {
+        cutAt = match.index + match[0].length;
+      } else break;
+    }
+    if (cutAt === -1) {
+      // Không có dấu câu → cắt ở khoảng trắng gần nhất
+      let spaceIdx = remaining.lastIndexOf(' ', maxLen);
+      cutAt = spaceIdx > 0 ? spaceIdx + 1 : maxLen;
+    }
+    result.push(remaining.slice(0, cutAt).trim());
+    remaining = remaining.slice(cutAt);
+  }
+  if (remaining.trim()) result.push(remaining.trim());
+  return result;
+}
+
+// =========================================================
+//  BUILD WORD SPANS — tạo các thẻ span cho từng từ
+// =========================================================
+function buildWordSpans(text) {
+  const area = document.getElementById('readingArea');
+  document.getElementById('placeholderMsg')?.remove();
+  area.innerHTML = '';
+  words = [];
+  chunkWordOffsets = [];
+
+  let globalIdx = 0;
+  chunks.forEach((chunk, ci) => {
+    chunkWordOffsets.push(globalIdx);
+    // Tách từng từ + khoảng trắng, giữ nguyên dấu câu
+    const tokens = chunk.split(/(\s+)/);
+    tokens.forEach(token => {
+      if (/\S/.test(token)) {
+        const span = document.createElement('span');
+        span.className = 'word';
+        span.textContent = token;
+        span.dataset.idx = globalIdx;
+        area.appendChild(span);
+        words.push(span);
+        globalIdx++;
+      } else {
+        area.appendChild(document.createTextNode(token));
+      }
+    });
+    // Thêm khoảng cách giữa các chunk
+    area.appendChild(document.createTextNode(' '));
+  });
+}
+
+// =========================================================
+//  HIGHLIGHT WORD
+// =========================================================
+function highlightWord(idx) {
+  words.forEach((w, i) => {
+    if (i < idx) w.className = 'word spoken';
+    else if (i === idx) {
+      w.className = 'word active';
+      w.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } else {
+      w.className = 'word';
+    }
+  });
+  // Cập nhật progress
+  const pct = words.length > 0 ? Math.round((idx / words.length) * 100) : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = pct + '%';
+}
+
+// =========================================================
+//  SPEAK CHUNK — đọc từng đoạn
+// =========================================================
+function speakChunk(index) {
+  if (index >= chunks.length) {
+    // Đọc xong tất cả
+    finishReading();
+    return;
+  }
+
+  currentChunk = index;
+  wordOffset = chunkWordOffsets[index];
+
+  document.getElementById('chunkInfo').textContent =
+    chunks.length > 1 ? `đoạn ${index+1}/${chunks.length}` : '';
+
+  utterance = new SpeechSynthesisUtterance(chunks[index]);
+  utterance.rate = rate;
+  utterance.pitch = pitch;
+
+  // Gán giọng đọc
+  const selIdx = parseInt(document.getElementById('voiceSelect').value);
+  if (!isNaN(selIdx) && voices[selIdx]) {
+    utterance.voice = voices[selIdx];
+  }
+
+  // Event: highlight từng từ đang đọc
+  utterance.onboundary = function(e) {
+    if (e.name === 'word') {
+      // Đếm từ dựa trên charIndex trong chunk
+      const chunkBefore = chunks[index].slice(0, e.charIndex);
+      const wordIdx = chunkBefore.split(/\s+/).filter(w => /\S/.test(w)).length;
+      highlightWord(wordOffset + wordIdx);
+    }
+  };
+
+  utterance.onend = function() {
+    if (!isPaused) {
+      speakChunk(index + 1);
+    }
+  };
+
+  utterance.onerror = function(e) {
+    if (e.error !== 'interrupted') {
+      showToast('⚠ Lỗi đọc: ' + e.error);
+    }
+  };
+
+  synth.speak(utterance);
+}
+
+// =========================================================
+//  CONTROLS
+// =========================================================
+function startReading() {
+  const text = document.getElementById('inputText').value.trim();
+  if (!text) { showToast('Vui lòng nhập văn bản!'); return; }
+
+  stopReading();
+  chunks = chunkText(text, 800);
+  buildWordSpans(text);
+
+  isPlaying = true;
+  isPaused = false;
+  updateUI();
+  speakChunk(0);
+}
+
+function togglePause() {
+  if (!isPlaying) return;
+  if (isPaused) {
+    isPaused = false;
+    synth.resume();
+    setStatus('playing', 'Đang đọc');
+    document.getElementById('btnPause').textContent = '⏸';
+  } else {
+    isPaused = true;
+    synth.pause();
+    setStatus('paused', 'Tạm dừng');
+    document.getElementById('btnPause').textContent = '▶';
+  }
+}
+
+function stopReading() {
+  synth.cancel();
+  isPlaying = false;
+  isPaused = false;
+  currentChunk = 0;
+  utterance = null;
+  updateUI();
+  setStatus('', 'Chờ');
+  document.getElementById('progressFill').style.width = '0%';
+  document.getElementById('progressLabel').textContent = '0%';
+  document.getElementById('chunkInfo').textContent = '';
+  words.forEach(w => w.className = 'word');
+}
+
+function finishReading() {
+  isPlaying = false;
+  isPaused = false;
+  updateUI();
+  setStatus('', 'Xong ✓');
+  document.getElementById('progressFill').style.width = '100%';
+  document.getElementById('progressLabel').textContent = '100%';
+  words.forEach(w => w.className = 'word spoken');
+}
+
+function clearAll() {
+  stopReading();
+  document.getElementById('inputText').value = '';
+  document.getElementById('readingArea').innerHTML = '<div class="placeholder-msg" id="placeholderMsg">← Nhập văn bản rồi nhấn Đọc</div>';
+  document.getElementById('charBadge').textContent = '0 ký tự';
+  document.getElementById('charBadge').classList.remove('active');
+  words = []; chunks = [];
+}
+
+// Seek bằng cách click vào thanh progress
+function seekByClick(e) {
+  if (!words.length || !isPlaying) return;
+  const bar = document.getElementById('progressBar');
+  const ratio = e.offsetX / bar.offsetWidth;
+  const targetWordIdx = Math.floor(ratio * words.length);
+  // Tìm chunk chứa word đó
+  let targetChunk = 0;
+  for (let i = chunkWordOffsets.length - 1; i >= 0; i--) {
+    if (chunkWordOffsets[i] <= targetWordIdx) {
+      targetChunk = i;
+      break;
+    }
+  }
+  synth.cancel();
+  isPaused = false;
+  // Highlight đến vị trí seek
+  for (let i = 0; i < targetWordIdx; i++) words[i].className = 'word spoken';
+  speakChunk(targetChunk);
+}
+
+// =========================================================
+//  SETTINGS
+// =========================================================
+function updateRate(v) {
+  rate = parseFloat(v);
+  document.getElementById('rateVal').textContent = rate + '×';
+  if (utterance) utterance.rate = rate;
+}
+
+function updatePitch(v) {
+  pitch = pars
